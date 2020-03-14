@@ -16,6 +16,9 @@ Apify.main(async () => {
 
     const crawler = new Apify.PuppeteerCrawler({
         requestList,
+        launchPuppeteerOptions: {
+            useApifyProxy: true,
+        },
         handlePageTimeoutSecs: 120, // page randomly fails to respond
         gotoFunction: async ({ page, request  }) => {
             const functionName = `fn${(Math.random() * 1000).toFixed(0)}`
