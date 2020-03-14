@@ -56,7 +56,7 @@ Apify.main(async () => {
     }
 
     const [, day, time] = modified.match(/em ([\S]+) às ([\S]+)/);
-    const lastUpdatedAtSource = new Date(`${day.split('/').reverse().join('-')}T${time}:00`);
+    const lastUpdatedAtSource = new Date(`${day.split('/').reverse().join('-')}T${time}:00-03:00`);
 
     const regions = csvData.filter(i => /^Unidade/.test(i[0]));
 
