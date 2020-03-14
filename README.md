@@ -5,3 +5,5 @@ Grabs information from http://plataforma.saude.gov.br/novocoronavirus/ and expor
 The latest information can be found in https://api.apify.com/v2/key-value-stores/TyToNta7jGKkpszMZ/records/LATEST?disableRedirect=true
 
 Actor ready-to-use on the Apify platform is available in https://apify.com/pocesar/covid-brazil
+
+Updated every hour
