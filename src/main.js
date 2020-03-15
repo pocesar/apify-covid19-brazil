@@ -62,6 +62,13 @@ Apify.main(async () => {
 
     const cleanNumber = (strVal) => +(strVal.replace(/[^\d]+/g, ''));
 
+    const DATA_INDEX = {
+        TESTED: 2,
+        INFECTED: 4,
+        NOT_INFECTED: 6,
+        DECEASED: 8
+    };
+
     const countTotals = (index) => {
         return regions.reduce((out, i) => (out + cleanNumber(i[index])), 0)
     }
@@ -76,17 +83,25 @@ Apify.main(async () => {
         return val;
     }
 
-    const totalTested = countTotals(2);
-    const infected = countTotals(4);
-    const testedNotInfected = countTotals(6);
-    const deceased = countTotals(8);
+    const countRegion = (index) => {
+        return regions.map(s => ({ state: extractState(s[1]), count: cleanNumber(s[index]) }));
+    }
+
+
+    const totalTested = countTotals(DATA_INDEX.TESTED);
+    const infected = countTotals(DATA_INDEX.INFECTED);
+    const testedNotInfected = countTotals(DATA_INDEX.NOT_INFECTED);
+    const deceased = countTotals(DATA_INDEX.DECEASED);
 
     const data = {
         totalTested,
         testedNotInfected,
         infected,
         deceased,
-        infectedByRegion: regions.map(s => ({ state: extractState(s[1]), count: cleanNumber(s[4]) })),
+        testedByRegion: countRegion(DATA_INDEX.TESTED),
+        testedNotInfectedByRegion: countRegion(DATA_INDEX.NOT_INFECTED),
+        infectedByRegion: countRegion(DATA_INDEX.INFECTED),
+        deceasedByRegion: countRegion(DATA_INDEX.DECEASED),
         sourceUrl,
         lastUpdatedAtSource,
         lastUpdatedAtApify: new Date().toISOString(),
