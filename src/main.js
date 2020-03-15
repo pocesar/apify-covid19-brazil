@@ -17,7 +17,7 @@ Apify.main(async () => {
     const crawler = new Apify.PuppeteerCrawler({
         requestList,
         launchPuppeteerOptions: {
-            useApifyProxy: true,
+            //useApifyProxy: true,
         },
         handlePageTimeoutSecs: 120, // page randomly fails to respond
         gotoFunction: async ({ page, request  }) => {
@@ -56,7 +56,7 @@ Apify.main(async () => {
     }
 
     const [, day, time] = modified.match(/em ([\S]+) às ([\S]+)/);
-    const lastUpdatedAtSource = new Date(`${day.split('/').reverse().join('-')}T${time}:00-03:00`);
+    const lastUpdatedAtSource = new Date(`${day.split('/').reverse().join('-')}T${time}:00-03:00`).toISOString();
 
     const regions = csvData.filter(i => /^Unidade/.test(i[0]));
 
@@ -81,20 +81,34 @@ Apify.main(async () => {
     const testedNotInfected = countTotals(6);
     const deceased = countTotals(8);
 
-    await kv.setValue('LATEST', {
+    const data = {
         totalTested,
         testedNotInfected,
         infected,
         deceased,
-        testedCases: [],
-        totalPositiveTests: [],
-        numberOfTestedGraph: [],
         infectedByRegion: regions.map(s => ({ state: extractState(s[1]), count: cleanNumber(s[4]) })),
         sourceUrl,
         lastUpdatedAtSource,
         lastUpdatedAtApify: new Date().toISOString(),
         readMe: 'https://apify.com/pocesar/covid-brazil'
-    });
+    };
+
+    await kv.setValue('LATEST', data);
+
+    const info = await history.getInfo();
+
+    if (info && info.itemCount > 0) {
+        const currentData = await history.getData({
+            limit: 1,
+            offset: info.itemCount - 1
+        });
+
+        if (currentData && currentData.items[0] && currentData.items[0].lastUpdatedAtSource !== lastUpdatedAtSource) {
+            await history.pushData(data);
+        }
+    } else {
+        await history.pushData(data);
+    }
 
     log.info('Done');
 });
