@@ -60,6 +60,10 @@ Apify.main(async () => {
 
     const regions = csvData.filter(i => /^Unidade/.test(i[0]));
 
+    if (!regions.length || regions.some(s => (!s[1] || s[1].includes('undefined')))) {
+        throw new Error('Data seems corrupt');
+    }
+
     const cleanNumber = (strVal) => +(strVal.replace(/[^\d]+/g, ''));
 
     const DATA_INDEX = {
@@ -80,13 +84,12 @@ Apify.main(async () => {
             return matches[1]
         }
 
-        return val;
+        throw new Error('Data seems corrupt');
     }
 
     const countRegion = (index) => {
         return regions.map(s => ({ state: extractState(s[1]), count: cleanNumber(s[index]) }));
     }
-
 
     const totalTested = countTotals(DATA_INDEX.TESTED);
     const infected = countTotals(DATA_INDEX.INFECTED);
