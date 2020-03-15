@@ -17,7 +17,7 @@ Apify.main(async () => {
     const crawler = new Apify.PuppeteerCrawler({
         requestList,
         launchPuppeteerOptions: {
-            //useApifyProxy: true,
+            useApifyProxy: Apify.isAtHome(),
         },
         handlePageTimeoutSecs: 120, // page randomly fails to respond
         gotoFunction: async ({ page, request  }) => {
