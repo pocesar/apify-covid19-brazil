@@ -110,5 +110,8 @@ Apify.main(async () => {
         await history.pushData(data);
     }
 
+    // always push data to default dataset
+    await Apify.pushData(data);
+
     log.info('Done');
 });
