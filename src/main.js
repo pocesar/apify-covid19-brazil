@@ -1,6 +1,6 @@
 const Apify = require('apify');
 
-const { log } = Apify.utils;
+const { log, sleep } = Apify.utils;
 
 Apify.main(async () => {
     const kv = await Apify.openKeyValueStore('COVID-19-BRAZIL');
@@ -19,7 +19,7 @@ Apify.main(async () => {
         launchPuppeteerOptions: {
             useApifyProxy: Apify.isAtHome(),
         },
-        handlePageTimeoutSecs: 120, // page randomly fails to respond
+        handlePageTimeoutSecs: 180, // page randomly fails to respond
         gotoFunction: async ({ page, request  }) => {
             const functionName = `fn${(Math.random() * 1000).toFixed(0)}`
             await page.exposeFunction(functionName, (data) => {
@@ -34,9 +34,16 @@ Apify.main(async () => {
 
             return page.goto(request.url, {
                 waitUntil: 'networkidle0',
+                timeout: 180 * 1000
             });
         },
-        handlePageFunction: async ({ page }) => {
+        handlePageFunction: async ({ page, response }) => {
+            if (response.status() !== 200) {
+                await sleep(30000);
+
+                throw new Error(`Status code ${response.status()}`);
+            }
+
             await page.evaluate(() => {
                 window.dashboard.coronavirus.brazilCSV();
             });
