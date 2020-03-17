@@ -1,6 +1,6 @@
 const Apify = require('apify');
 
-const { log, sleep } = Apify.utils;
+const { log, sleep, puppeteer } = Apify.utils;
 
 Apify.main(async () => {
     const kv = await Apify.openKeyValueStore('COVID-19-BRAZIL');
@@ -19,11 +19,17 @@ Apify.main(async () => {
         launchPuppeteerOptions: {
             useApifyProxy: Apify.isAtHome(),
         },
+        maxConcurrency: 1,
         handlePageTimeoutSecs: 180, // page randomly fails to respond
         gotoFunction: async ({ page, request  }) => {
             const functionName = `fn${(Math.random() * 1000).toFixed(0)}`
             await page.exposeFunction(functionName, (data) => {
                 csvData.push(...data);
+            });
+
+            await puppeteer.blockRequests(page, {
+                extraUrlPatterns: [],
+                urlPatterns: ['.woff', '.woff2', 'world2.svg', 'use.fontawesome.com', 'fluxo']
             });
 
             await page.evaluateOnNewDocument((fName) => {
@@ -43,6 +49,13 @@ Apify.main(async () => {
 
                 throw new Error(`Status code ${response.status()}`);
             }
+
+            await page.waitFor(() => {
+                return !!window.database
+                    && !!window.database.brazil
+                    && !!window.dashboard
+                    && !!window.dashboard.coronavirus
+            }, { timeout: 30000 });
 
             await page.evaluate(() => {
                 window.dashboard.coronavirus.brazilCSV();
