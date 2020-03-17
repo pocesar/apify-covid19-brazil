@@ -6,4 +6,4 @@ The latest information can be found in https://api.apify.com/v2/key-value-stores
 
 Actor ready-to-use on the Apify platform is available in https://apify.com/pocesar/covid-brazil
 
-URL is being actualized every 15 minutes.
+URL is being actualized every 15 minutes (not 5 minutes like other COVID actors), since the server is overloaded, and only updated in larger intervals.
