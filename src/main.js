@@ -53,12 +53,16 @@ Apify.main(async () => {
     await crawler.run();
 
     if (!csvData[0]) {
+        await Apify.setValue('missing', csvData);
+
         throw new Error('Missing data');
     }
 
     const [modified] = csvData.pop();
 
     if (!modified) {
+        await Apify.setValue('modified', csvData);
+
         throw new Error('Missing modified');
     }
 
@@ -68,6 +72,8 @@ Apify.main(async () => {
     const regions = csvData.filter(i => /^Unidade/.test(i[0]));
 
     if (!regions.length || regions.some(s => (!s[1] || s[1].includes('undefined')))) {
+        await Apify.setValue('regions', regions);
+
         throw new Error('Data seems corrupt');
     }
 
@@ -91,7 +97,7 @@ Apify.main(async () => {
             return matches[1]
         }
 
-        throw new Error('Data seems corrupt');
+        throw new Error('extractState seems corrupt');
     }
 
     const countRegion = (index) => {
@@ -103,15 +109,29 @@ Apify.main(async () => {
     const testedNotInfected = countTotals(DATA_INDEX.NOT_INFECTED);
     const deceased = countTotals(DATA_INDEX.DECEASED);
 
+    let byRegion = {};
+
+    try {
+        byRegion = {
+            testedByRegion: countRegion(DATA_INDEX.TESTED),
+            testedNotInfectedByRegion: countRegion(DATA_INDEX.NOT_INFECTED),
+            infectedByRegion: countRegion(DATA_INDEX.INFECTED),
+            deceasedByRegion: countRegion(DATA_INDEX.DECEASED),
+        }
+    } catch (e) {
+        // ugly hack, we need to catch corrupt data from the regions to analyze...
+        // usually the page failed to load completely
+        await Apify.setValue('countRegion', regions);
+
+        throw e;
+    }
+
     const data = {
         totalTested,
         testedNotInfected,
         infected,
         deceased,
-        testedByRegion: countRegion(DATA_INDEX.TESTED),
-        testedNotInfectedByRegion: countRegion(DATA_INDEX.NOT_INFECTED),
-        infectedByRegion: countRegion(DATA_INDEX.INFECTED),
-        deceasedByRegion: countRegion(DATA_INDEX.DECEASED),
+        ...byRegion,
         sourceUrl,
         lastUpdatedAtSource,
         lastUpdatedAtApify: new Date().toISOString(),
