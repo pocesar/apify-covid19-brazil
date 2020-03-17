@@ -1,6 +1,6 @@
 {
 	"name": "apify-covid19-brazil",
-	"version": "0.2",
+	"version": "1.0",
 	"buildTag": "latest",
 	"env": null,
 	"template": "apify_project"

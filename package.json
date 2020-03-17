@@ -1,6 +1,6 @@
 {
 	"name": "apify-covid19-brazil",
-	"version": "0.0.3",
+	"version": "1.0.0",
 	"description": "This is a boilerplate of an Apify actor.",
 	"dependencies": {
 		"apify": "^0.20.2"
