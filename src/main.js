@@ -1,6 +1,6 @@
 const Apify = require('apify');
 
-const { log, sleep, puppeteer } = Apify.utils;
+const { log, requestAsBrowser } = Apify.utils;
 
 Apify.main(async () => {
     const kv = await Apify.openKeyValueStore('COVID-19-BRAZIL');
@@ -9,147 +9,156 @@ Apify.main(async () => {
     const sourceUrl = 'http://plataforma.saude.gov.br/novocoronavirus/';
 
     const requestList = await Apify.openRequestList('page', [
-        sourceUrl
+        `http://plataforma.saude.gov.br/novocoronavirus/resources/scripts/database.js?v=${Math.round(Date.now() / 1000)}`,
     ]);
 
-    const csvData = [];
+    /**
+     * @param {any[]} values
+     * @param {'suspects'|'cases'|'refuses'|'deaths'} key
+     */
+    const countTotals = (values, key) => {
+        return values.reduce((out, i) => (out + (i[key] || 0)), 0);
+    };
+    const statesMap = {
+        11: 'RO',
+        12: 'AC',
+        13: 'AM',
+        14: 'RR',
+        15: 'PA',
+        16: 'AP',
+        17: 'TO',
+        21: 'MA',
+        22: 'PI',
+        23: 'CE',
+        24: 'RN',
+        25: 'PB',
+        26: 'PE',
+        27: 'AL',
+        28: 'SE',
+        29: 'BA',
+        31: 'MG',
+        32: 'ES',
+        33: 'RJ',
+        35: 'SP',
+        41: 'PR',
+        42: 'SC',
+        43: 'RS',
+        50: 'MS',
+        51: 'MT',
+        52: 'GO',
+        53: 'DF',
+    };
 
-    const crawler = new Apify.PuppeteerCrawler({
+    /**
+     * @param {any[]} values
+     * @param {'suspects'|'cases'|'refuses'|'deaths'} key
+     */
+    const mapRegions = (values, key) => {
+        return values.map(i => ({
+            state: statesMap[i.uid],
+            count: i[key] || 0,
+        }));
+    };
+
+    let data;
+    let lastUpdatedAtSource;
+
+    const crawler = new Apify.BasicCrawler({
         requestList,
-        launchPuppeteerOptions: {
-            useApifyProxy: Apify.isAtHome(),
-        },
+        useSessionPool: true,
         maxConcurrency: 1,
-        handlePageTimeoutSecs: 180, // page randomly fails to respond
-        gotoFunction: async ({ page, request  }) => {
-            const functionName = `fn${(Math.random() * 1000).toFixed(0)}`
-            await page.exposeFunction(functionName, (data) => {
-                csvData.push(...data);
+        handleRequestTimeoutSecs: 180,
+        handleRequestFunction: async ({ request, session }) => {
+            const result = await requestAsBrowser({
+                url: request.url,
+                method: 'GET',
+                abortFunction: () => false,
+                gzip: true,
+                useBrotli: false,
+                timeoutSecs: 120,
+                json: false,
+                headers: {
+                    Accept: '*/*',
+                    Pragma: 'no-cache',
+                    DNT: '1',
+                    'Cache-Control': 'no-cache',
+                    Referer: sourceUrl,
+                },
+                proxyUrl: Apify.isAtHome() ? Apify.getApifyProxyUrl({
+                    session: session.id,
+                }) : undefined,
             });
 
-            await puppeteer.blockRequests(page, {
-                extraUrlPatterns: [],
-                urlPatterns: ['.woff', '.woff2', 'world2.svg', 'use.fontawesome.com', 'fluxo']
-            });
+            if (result.statusCode !== 200) {
+                await Apify.setValue(`statusCode-${result.statusCode}-${Math.random()}`, result.body, { contentType: 'text/plain' });
 
-            await page.evaluateOnNewDocument((fName) => {
-                window.addEventListener('load', () => {
-                    window.dashboard.toolbox.exportCSV = window[fName];
-                });
-            }, functionName);
-
-            return page.goto(request.url, {
-                waitUntil: 'networkidle0',
-                timeout: 180 * 1000
-            });
-        },
-        handlePageFunction: async ({ page, response }) => {
-            if (response.status() !== 200) {
-                await sleep(30000);
-
-                throw new Error(`Status code ${response.status()}`);
+                throw new Error(`Status code ${result.statusCode}`);
             }
 
-            await page.waitFor(() => {
-                return !!window.database
-                    && !!window.database.brazil
-                    && !!window.dashboard
-                    && !!window.dashboard.coronavirus
-            }, { timeout: 30000 });
+            const searchString = 'var database=';
 
-            await page.evaluate(() => {
-                window.dashboard.coronavirus.brazilCSV();
-            });
-        }
+            if (!result.body || !result.body.includes(searchString)) {
+                await Apify.setValue(`body-${Math.random()}`, result.body, { contentType: 'text/plain' });
+
+                throw new Error('Invalid body received');
+            }
+
+            const { body } = result;
+
+            const startOffset = body.indexOf(searchString) + searchString.length;
+            const endOffset = body.lastIndexOf('}') + 1;
+            const slice = body.slice(startOffset, endOffset);
+
+            try {
+                const jsonData = JSON.parse(slice).brazil.pop();
+                const { values, date, time } = jsonData;
+
+                lastUpdatedAtSource = new Date(`${date.split('/').reverse().join('-')}T${time}:00-03:00`).toISOString();
+
+                data = {
+                    suspiciousCases: countTotals(values, 'suspects'),
+                    testedNotInfected: countTotals(values, 'refuses'),
+                    infected: countTotals(values, 'cases'),
+                    deceased: countTotals(values, 'deaths'),
+                    suspiciousCasesByRegion: mapRegions(values, 'suspects'),
+                    testedNotInfectedByRegion: mapRegions(values, 'refuses'),
+                    infectedByRegion: mapRegions(values, 'cases'),
+                    deceasedByRegion: mapRegions(values, 'deaths'),
+                    sourceUrl,
+                    lastUpdatedAtSource,
+                    lastUpdatedAtApify: new Date().toISOString(),
+                    readMe: 'https://apify.com/pocesar/covid-brazil',
+                };
+            } catch (e) {
+                await Apify.setValue(`json-${Math.random()}`, slice, { contentType: 'text/plain' });
+
+                log.exception(e);
+
+                throw e;
+            }
+        },
+        handleFailedRequestFunction: ({ error }) => {
+            log.exception(error, 'Failed after all retries');
+        },
     });
 
     await crawler.run();
 
-    if (!csvData[0]) {
-        await Apify.setValue('missing', csvData);
-
+    if (!data || !lastUpdatedAtSource) {
         throw new Error('Missing data');
     }
 
-    const [modified] = csvData.pop();
+    // we want to crash here if there's something wrong with the data
+    for (const key of ['suspiciousCasesByRegion', 'testedNotInfectedByRegion', 'infectedByRegion', 'deceasedByRegion']) {
+        if (!data[key]
+        || data[key].length === 0
+        || data[key].some(i => (typeof i.count !== 'number' || !i.state || !/^[A-Z]{2}$/i.test(i.state)))
+        ) {
+            await Apify.setValue(`data-${Math.random()}`, data);
 
-    if (!modified) {
-        await Apify.setValue('modified', csvData);
-
-        throw new Error('Missing modified');
-    }
-
-    const [, day, time] = modified.match(/em ([\S]+) às ([\S]+)/);
-    const lastUpdatedAtSource = new Date(`${day.split('/').reverse().join('-')}T${time}:00-03:00`).toISOString();
-
-    const regions = csvData.filter(i => /^Unidade/.test(i[0]));
-
-    if (!regions.length || regions.some(s => (!s[1] || s[1].includes('undefined')))) {
-        await Apify.setValue('regions', regions);
-
-        throw new Error('Data seems corrupt');
-    }
-
-    const cleanNumber = (strVal) => +(strVal.replace(/[^\d]+/g, ''));
-
-    const DATA_INDEX = {
-        SUSPICIOUS: 2,
-        INFECTED: 4,
-        NOT_INFECTED: 6,
-        DECEASED: 8
-    };
-
-    const countTotals = (index) => {
-        return regions.reduce((out, i) => (out + cleanNumber(i[index])), 0)
-    }
-
-    const extractState = (val) => {
-        const matches = val.match(/\(([A-Z]{2})\)/);
-
-        if (matches && matches[1]) {
-            return matches[1]
+            throw new Error('Data seems corrupt');
         }
-
-        throw new Error('extractState seems corrupt');
     }
-
-    const countRegion = (index) => {
-        return regions.map(s => ({ state: extractState(s[1]), count: cleanNumber(s[index]) }));
-    }
-
-    const suspiciousCases = countTotals(DATA_INDEX.SUSPICIOUS);
-    const infected = countTotals(DATA_INDEX.INFECTED);
-    const testedNotInfected = countTotals(DATA_INDEX.NOT_INFECTED);
-    const deceased = countTotals(DATA_INDEX.DECEASED);
-
-    let byRegion = {};
-
-    try {
-        byRegion = {
-            suspiciousCasesByRegion: countRegion(DATA_INDEX.SUSPICIOUS),
-            testedNotInfectedByRegion: countRegion(DATA_INDEX.NOT_INFECTED),
-            infectedByRegion: countRegion(DATA_INDEX.INFECTED),
-            deceasedByRegion: countRegion(DATA_INDEX.DECEASED),
-        }
-    } catch (e) {
-        // ugly hack, we need to catch corrupt data from the regions to analyze...
-        // usually the page failed to load completely
-        await Apify.setValue('countRegion', regions);
-
-        throw e;
-    }
-
-    const data = {
-        suspiciousCases,
-        testedNotInfected,
-        infected,
-        deceased,
-        ...byRegion,
-        sourceUrl,
-        lastUpdatedAtSource,
-        lastUpdatedAtApify: new Date().toISOString(),
-        readMe: 'https://apify.com/pocesar/covid-brazil'
-    };
 
     await kv.setValue('LATEST', data);
 
@@ -158,7 +167,7 @@ Apify.main(async () => {
     if (info && info.itemCount > 0) {
         const currentData = await history.getData({
             limit: 1,
-            offset: info.itemCount - 1
+            offset: info.itemCount - 1,
         });
 
         if (currentData && currentData.items[0] && currentData.items[0].lastUpdatedAtSource !== lastUpdatedAtSource) {
