@@ -1,5 +1,4 @@
 const Apify = require('apify');
-const cheerio = require('cheerio');
 
 const { log } = Apify.utils;
 
@@ -9,7 +8,6 @@ Apify.main(async () => {
 
     const sourceUrl = 'https://www.saude.gov.br/noticias/agencia-saude';
 
-    const requestQueue = await Apify.openRequestQueue();
     const info = await history.getInfo();
     let lastUpdate = new Date();
 
@@ -24,13 +22,17 @@ Apify.main(async () => {
         }
     }
 
-    await requestQueue.addRequest({
-        url: 'https://www.saude.gov.br/noticias/agencia-saude?format=feed&type=rss',
-        uniqueKey: `${Math.random()}`,
+    const requestList = await Apify.openRequestList('mapa', [{
+        url: `${process.env.BASE_URL}/prod/PortalMapa`,
         userData: {
-            label: 'FEED',
+            LABEL: 'regions',
         },
-    });
+    }, {
+        url: `${process.env.BASE_URL}/prod/PortalGeral`,
+        userData: {
+            LABEL: 'geral',
+        },
+    }]);
 
     /**
      * @param {any[]} values
@@ -48,60 +50,40 @@ Apify.main(async () => {
         return values.map(s => ({ state: s.state, count: s[key] || 0 }));
     };
 
-    const DATA_INDEX = {
-        UF: 1,
-        INFECTED: 2,
-        DEATHS: 3,
-    };
+    const version = 3;
+    const data = {
+        version,
 
-    const version = 2;
-    const data = new Map();
+    };
     let lastUpdatedAtSource;
 
     const crawler = new Apify.CheerioCrawler({
-        requestQueue,
-        additionalMimeTypes: ['application/rss+xml'],
+        requestList,
+        additionalMimeTypes: ['application/json'],
         useSessionPool: true,
         maxConcurrency: 1,
         useApifyProxy: true,
+        prepareRequestFunction: ({ request }) => {
+            request.headers.Referer = 'https://covid.saude.gov.br/';
+            request.headers['X-Parse-Application-Id'] = process.env.KEY;
+        },
         handlePageTimeoutSecs: 180,
-        handlePageFunction: async ({ request, body, $ }) => {
-            const { label } = request.userData;
+        handlePageFunction: async ({ request, json }) => {
+            const { results } = json;
+            const { LABEL } = request.userData;
 
-            if (label === 'FEED') {
-                log.info('Parsing feed');
+            if (!results || !results[0]) {
+                await Apify.setValue(`results-${Math.random()}`, { results });
+                throw new Error('Results are empty');
+            }
 
-                $ = cheerio.load(body, { decodeEntities: true, xmlMode: true });
+            if (LABEL === 'regions') {
 
-                const urls = new Set();
-
-                $('item').each((index, el) => {
-                    const $el = $(el);
-
-                    const link = $el.find('link').text();
-
-                    if (link && link.includes('confirmados') && link.includes('coronavirus')) {
-                        urls.add(link);
-                    }
-                });
-
-                for (const url of urls) {
-                    await requestQueue.addRequest({
-                        url,
-                        userData: {
-                            label: 'PAGE',
-                        },
-                    });
-                }
-
-                log.info(`Found ${urls.size} new possible urls`);
-            } else if (label === 'PAGE') {
-                const ld = JSON.parse($('[type="application/ld+json"]').html());
-
-                const dateModified = new Date(ld.dateModified);
+            } else if (LABEL === 'geral') {
+                const dateModified = new Date(results[0].updatedAt);
 
                 if (Number.isNaN(dateModified.getTime())) {
-                    log.warning('Invalid date', { dateModified, ld });
+                    log.warning('Invalid date', { dateModified, results });
 
                     throw new Error('Invalid date');
                 }
@@ -111,30 +93,45 @@ Apify.main(async () => {
                 }
 
                 if (!lastUpdatedAtSource || dateModified.getTime() > lastUpdatedAtSource.getTime()) {
-                    lastUpdatedAtSource = new Date(dateModified);
-                }
-
-                const aggregate = [];
-
-                $('.su-table table tr').each((index, el) => {
-                    const $el = $(el);
-                    const tds = $el.find('td');
-
-                    if (tds.length !== 5) {
-                        return;
-                    }
-
-                    const state = tds.eq(DATA_INDEX.UF).text().trim();
-                    const deceased = +(tds.eq(DATA_INDEX.DEATHS).text().trim());
-                    const infected = +(tds.eq(DATA_INDEX.INFECTED).text().trim());
-
-                    aggregate.push({ state, deceased, infected });
-                });
-
-                if (aggregate.length) {
-                    data.set(dateModified.toISOString(), aggregate);
+                    lastUpdatedAtSource = dateModified;
                 }
             }
+
+
+            // if (Number.isNaN(dateModified.getTime())) {
+            //     log.warning('Invalid date', { dateModified, ld });
+
+            //     throw new Error('Invalid date');
+            // }
+
+            // if (dateModified.getTime() < lastUpdate.getTime()) {
+            //     return;
+            // }
+
+            // if (!lastUpdatedAtSource || dateModified.getTime() > lastUpdatedAtSource.getTime()) {
+            //     lastUpdatedAtSource = new Date(dateModified);
+            // }
+
+            // const aggregate = [];
+
+            // $('.su-table table tr').each((index, el) => {
+            //     const $el = $(el);
+            //     const tds = $el.find('td');
+
+            //     if (tds.length !== 5) {
+            //         return;
+            //     }
+
+            //     const state = tds.eq(DATA_INDEX.UF).text().trim();
+            //     const deceased = +(tds.eq(DATA_INDEX.DEATHS).text().trim());
+            //     const infected = +(tds.eq(DATA_INDEX.INFECTED).text().trim());
+
+            //     aggregate.push({ state, deceased, infected });
+            // });
+
+            // if (aggregate.length) {
+            //     data.set(dateModified.toISOString(), aggregate);
+            // }
         },
         handleFailedRequestFunction: ({ error }) => {
             log.exception(error, 'Failed after all retries');
