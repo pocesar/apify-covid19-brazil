@@ -48,6 +48,8 @@ Apify.main(async () => {
         return values.map(s => ({ state: s.state, count: s[key] || 0 }));
     };
 
+    const cleanNumber = (str) => str.replace(/[^0-9]+/, '');
+
     const DATA_INDEX = {
         UF: 1,
         INFECTED: 2,
@@ -125,8 +127,8 @@ Apify.main(async () => {
                     }
 
                     const state = tds.eq(DATA_INDEX.UF).text().trim();
-                    const deceased = +(tds.eq(DATA_INDEX.DEATHS).text().trim());
-                    const infected = +(tds.eq(DATA_INDEX.INFECTED).text().trim());
+                    const deceased = +(cleanNumber(tds.eq(DATA_INDEX.DEATHS).text().trim()));
+                    const infected = +(cleanNumber(tds.eq(DATA_INDEX.INFECTED).text().trim()));
 
                     aggregate.push({ state, deceased, infected });
                 });
