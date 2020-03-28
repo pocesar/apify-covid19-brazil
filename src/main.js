@@ -120,7 +120,7 @@ Apify.main(async () => {
 
                 $('.su-table table tr').each((index, el) => {
                     const $el = $(el);
-                    const tds = $el.find('td');
+                    const tds = $el.find('td:not([colspan])');
 
                     if (tds.length !== 5) {
                         return;
@@ -171,6 +171,25 @@ Apify.main(async () => {
             readMe: 'https://apify.com/pocesar/covid-brazil',
         };
     });
+
+    const checkRegions = (item) => !Number.isInteger(item.count) || !item.state || item.state.length !== 2;
+
+    // sanity check before updating, the data is seldomly unreliable
+    for (const item of transformedData) {
+        if (!Number.isInteger(item.deceased)
+            || !Number.isInteger(item.infected)
+            || !item.infected
+            || !item.deceased
+            || item.deceasedByRegion.length !== 27
+            || item.infectedByRegion.length !== 27
+            || item.deceasedByRegion.some(checkRegions)
+            || item.infectedByRegion.some(checkRegions)
+        ) {
+            await Apify.setValue('transformedData', transformedData);
+
+            throw new Error('Data check failed');
+        }
+    }
 
     await kv.setValue('LATEST', transformedData[transformedData.length - 1]);
 
