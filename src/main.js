@@ -127,8 +127,8 @@ Apify.main(async () => {
                     }
 
                     const state = tds.eq(DATA_INDEX.UF).text().trim();
-                    const deceased = +(cleanNumber(tds.eq(DATA_INDEX.DEATHS).text().trim()));
-                    const infected = +(cleanNumber(tds.eq(DATA_INDEX.INFECTED).text().trim()));
+                    const deceased = +(cleanNumber(tds.eq(DATA_INDEX.DEATHS).text().trim())) || 0;
+                    const infected = +(cleanNumber(tds.eq(DATA_INDEX.INFECTED).text().trim())) || 0;
 
                     aggregate.push({ state, deceased, infected });
                 });
