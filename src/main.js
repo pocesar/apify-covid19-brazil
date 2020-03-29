@@ -12,15 +12,17 @@ Apify.main(async () => {
     const requestQueue = await Apify.openRequestQueue();
     const info = await history.getInfo();
     let lastUpdate = new Date();
+    let currentData;
 
     if (info && info.itemCount > 0) {
-        const currentData = await history.getData({
+        currentData = await history.getData({
             limit: 1,
             offset: info.itemCount - 1,
         });
 
         if (currentData && currentData.items[0] && currentData.items[0].lastUpdatedAtSource) {
             lastUpdate = new Date(currentData.items[0].lastUpdatedAtSource);
+            currentData = currentData.items[0];
         }
     }
 
@@ -123,6 +125,8 @@ Apify.main(async () => {
                     return;
                 }
 
+                hasNewData = true;
+
                 const aggregate = [];
 
                 $('.su-table table tr').each((index, el) => {
@@ -146,8 +150,6 @@ Apify.main(async () => {
                 });
 
                 if (aggregate.length) {
-                    hasNewData = true;
-
                     data.set(dateModified.toISOString(), aggregate);
                 }
             }
@@ -161,7 +163,18 @@ Apify.main(async () => {
 
     if (!hasNewData) {
         log.info('No new data', { lastUpdatedAtSource, lastUpdate });
-        // no new data, don't fail
+
+        // no new data, don't fail, just update the timestamp
+        if (currentData) {
+            currentData = {
+                ...currentData,
+                lastUpdatedAtApify: new Date().toISOString(),
+            };
+
+            await Apify.pushData(currentData);
+            await kv.setValue('LATEST', currentData);
+        }
+
         return;
     }
 
