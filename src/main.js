@@ -127,13 +127,18 @@ Apify.main(async () => {
 
                 $('.su-table table tr').each((index, el) => {
                     const $el = $(el);
-                    const tds = $el.find('td:not([colspan])');
+                    const tds = $el.find('td');
 
-                    if (tds.length !== 5) {
+                    if (tds.length && (tds[0].attribs['colspan'] || tds[0].attribs['rowspan'])) {
                         return;
                     }
 
                     const state = tds.eq(DATA_INDEX.UF).text().trim();
+
+                    if (!/^[A-Z]{2}$/.test(state)) {
+                        return;
+                    }
+
                     const deceased = +(cleanNumber(tds.eq(DATA_INDEX.DEATHS).text().trim())) || 0;
                     const infected = +(cleanNumber(tds.eq(DATA_INDEX.INFECTED).text().trim())) || 0;
 
