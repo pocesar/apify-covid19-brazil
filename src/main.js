@@ -32,6 +32,8 @@ Apify.main(async () => {
         },
     });
 
+    log.info(`Last update ${lastUpdate.toISOString()}`);
+
     /**
      * @param {any[]} values
      * @param {'infected'|'deceased'} key
@@ -48,7 +50,7 @@ Apify.main(async () => {
         return values.map(s => ({ state: s.state, count: s[key] || 0 }));
     };
 
-    const cleanNumber = (str) => str.replace(/[^0-9]+/, '');
+    const cleanNumber = (str) => str.replace(/[^0-9]+/g, '');
 
     const DATA_INDEX = {
         UF: 1,
@@ -59,6 +61,7 @@ Apify.main(async () => {
     const version = 2;
     const data = new Map();
     let lastUpdatedAtSource;
+    let hasNewData = false;
 
     const crawler = new Apify.CheerioCrawler({
         requestQueue,
@@ -108,12 +111,16 @@ Apify.main(async () => {
                     throw new Error('Invalid date');
                 }
 
-                if (dateModified.getTime() < lastUpdate.getTime()) {
+                if (dateModified.getTime() <= lastUpdate.getTime()) {
                     return;
                 }
 
                 if (!lastUpdatedAtSource || dateModified.getTime() > lastUpdatedAtSource.getTime()) {
                     lastUpdatedAtSource = new Date(dateModified);
+                }
+
+                if (lastUpdatedAtSource.getTime() <= lastUpdate.getTime()) {
+                    return;
                 }
 
                 const aggregate = [];
@@ -134,6 +141,8 @@ Apify.main(async () => {
                 });
 
                 if (aggregate.length) {
+                    hasNewData = true;
+
                     data.set(dateModified.toISOString(), aggregate);
                 }
             }
@@ -144,6 +153,12 @@ Apify.main(async () => {
     });
 
     await crawler.run();
+
+    if (!hasNewData) {
+        log.info('No new data', { lastUpdatedAtSource, lastUpdate });
+        // no new data, don't fail
+        return;
+    }
 
     if (!data.size || !lastUpdatedAtSource) {
         throw new Error('Missing data');
