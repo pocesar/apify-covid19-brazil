@@ -6,37 +6,71 @@ Apify.main(async () => {
     const kv = await Apify.openKeyValueStore('COVID-19-BRAZIL');
     const history = await Apify.openDataset('COVID-19-BRAZIL-HISTORY');
 
-    const sourceUrl = 'https://www.saude.gov.br/noticias/agencia-saude';
+    const sourceUrl = 'https://covid.saude.gov.br/';
 
     const info = await history.getInfo();
     let lastUpdate = new Date();
+    let currentData;
 
     if (info && info.itemCount > 0) {
-        const currentData = await history.getData({
+        currentData = await history.getData({
             limit: 1,
             offset: info.itemCount - 1,
         });
 
         if (currentData && currentData.items[0] && currentData.items[0].lastUpdatedAtSource) {
             lastUpdate = new Date(currentData.items[0].lastUpdatedAtSource);
+            currentData = currentData.items[0]; // eslint-disable-line prefer-destructuring
         }
     }
 
+    const regionMapping = {
+        Acre: 'AC',
+        Alagoas: 'AL',
+        'Amapá': 'AP',
+        Amazonas: 'AM',
+        Bahia: 'BA',
+        'Ceará': 'CE',
+        'Distrito Federal': 'DF',
+        'Espírito Santo': 'ES',
+        'Goiás': 'GO',
+        'Maranhão': 'MA',
+        'Mato Grosso': 'MT',
+        'Mato Grosso do Sul': 'MS',
+        'Minas Gerais': 'MG',
+        'Paraná': 'PR',
+        'Paraíba': 'PB',
+        'Pará': 'PA',
+        Pernambuco: 'PE',
+        'Piauí': 'PI',
+        'Rio Grande do Norte': 'RN',
+        'Rio Grande do Sul': 'RS',
+        'Rio de Janeiro': 'RJ',
+        'Rondônia': 'RO',
+        Roraima: 'RR',
+        'Santa Catarina': 'SC',
+        Sergipe: 'SE',
+        'São Paulo': 'SP',
+        Tocantins: 'TO',
+    };
+
     const requestList = await Apify.openRequestList('mapa', [{
-        url: `${process.env.BASE_URL}/prod/PortalMapa`,
+        url: 'https://xx9p7hp1p7.execute-api.us-east-1.amazonaws.com/prod/PortalMapa',
+        headers: {
+            'X-Parse-Application-Id': 'unAFkcaNDeXajurGB7LChj8SgQYS2ptm',
+            Origin: sourceUrl.slice(0, -1),
+            Referer: sourceUrl,
+        },
         userData: {
             LABEL: 'regions',
         },
-    }, {
-        url: `${process.env.BASE_URL}/prod/PortalGeral`,
-        userData: {
-            LABEL: 'geral',
-        },
     }]);
+
+    log.info(`Last update ${lastUpdate.toISOString()}`);
 
     /**
      * @param {any[]} values
-     * @param {'infected'|'deceased'} key
+     * @param {'qtd_obito'|'qtd_confirmado'} key
      */
     const countTotals = (values, key) => {
         return values.reduce((out, i) => (out + (i[key] || 0)), 0);
@@ -44,18 +78,30 @@ Apify.main(async () => {
 
     /**
      * @param {any[]} values
-     * @param {'deceased'|'infected'} key
+     * @param {'qtd_obito'|'qtd_confirmado'} key
      */
     const mapRegions = (values, key) => {
-        return values.map(s => ({ state: s.state, count: s[key] || 0 }));
+        return values.map(s => ({ state: regionMapping[s.nome], count: s[key] || 0 }));
     };
 
     const version = 3;
-    const data = {
+    let data = {
         version,
-
+        sourceUrl,
+        country: 'Brazil',
+        lastUpdatedAtApify: new Date().toISOString(),
+        historyData: 'https://api.apify.com/v2/datasets/3S2T1ZBxB9zhRJTBB/items?format=json&clean=1',
+        readMe: 'https://apify.com/pocesar/covid-brazil',
+        tested: 'N/A',
+        recovered: 'N/A',
     };
+
     let lastUpdatedAtSource;
+    let hasNewData = false;
+
+    const latestDate = results => results
+        .map(s => new Date(s.updatedAt))
+        .reduce((updated, s) => (s.getTime() > updated ? s : updated), new Date(0));
 
     const crawler = new Apify.CheerioCrawler({
         requestList,
@@ -63,14 +109,11 @@ Apify.main(async () => {
         useSessionPool: true,
         maxConcurrency: 1,
         useApifyProxy: true,
-        prepareRequestFunction: ({ request }) => {
-            request.headers.Referer = 'https://covid.saude.gov.br/';
-            request.headers['X-Parse-Application-Id'] = process.env.KEY;
-        },
         handlePageTimeoutSecs: 180,
         handlePageFunction: async ({ request, json }) => {
             const { results } = json;
             const { LABEL } = request.userData;
+
 
             if (!results || !results[0]) {
                 await Apify.setValue(`results-${Math.random()}`, { results });
@@ -78,9 +121,7 @@ Apify.main(async () => {
             }
 
             if (LABEL === 'regions') {
-
-            } else if (LABEL === 'geral') {
-                const dateModified = new Date(results[0].updatedAt);
+                const dateModified = latestDate(results);
 
                 if (Number.isNaN(dateModified.getTime())) {
                     log.warning('Invalid date', { dateModified, results });
@@ -88,50 +129,29 @@ Apify.main(async () => {
                     throw new Error('Invalid date');
                 }
 
-                if (dateModified.getTime() < lastUpdate.getTime()) {
+                if (dateModified.getTime() <= lastUpdate.getTime()) {
                     return;
                 }
 
                 if (!lastUpdatedAtSource || dateModified.getTime() > lastUpdatedAtSource.getTime()) {
                     lastUpdatedAtSource = dateModified;
                 }
+
+                if (lastUpdatedAtSource.getTime() <= lastUpdate.getTime()) {
+                    return;
+                }
+
+                hasNewData = true;
+
+                data = {
+                    ...data,
+                    lastUpdatedAtSource: lastUpdatedAtSource.toISOString(),
+                    infected: countTotals(results, 'qtd_confirmado'),
+                    deceased: countTotals(results, 'qtd_obito'),
+                    infectedByRegion: mapRegions(results, 'qtd_confirmado'),
+                    deceasedByRegion: mapRegions(results, 'qtd_obito'),
+                };
             }
-
-
-            // if (Number.isNaN(dateModified.getTime())) {
-            //     log.warning('Invalid date', { dateModified, ld });
-
-            //     throw new Error('Invalid date');
-            // }
-
-            // if (dateModified.getTime() < lastUpdate.getTime()) {
-            //     return;
-            // }
-
-            // if (!lastUpdatedAtSource || dateModified.getTime() > lastUpdatedAtSource.getTime()) {
-            //     lastUpdatedAtSource = new Date(dateModified);
-            // }
-
-            // const aggregate = [];
-
-            // $('.su-table table tr').each((index, el) => {
-            //     const $el = $(el);
-            //     const tds = $el.find('td');
-
-            //     if (tds.length !== 5) {
-            //         return;
-            //     }
-
-            //     const state = tds.eq(DATA_INDEX.UF).text().trim();
-            //     const deceased = +(tds.eq(DATA_INDEX.DEATHS).text().trim());
-            //     const infected = +(tds.eq(DATA_INDEX.INFECTED).text().trim());
-
-            //     aggregate.push({ state, deceased, infected });
-            // });
-
-            // if (aggregate.length) {
-            //     data.set(dateModified.toISOString(), aggregate);
-            // }
         },
         handleFailedRequestFunction: ({ error }) => {
             log.exception(error, 'Failed after all retries');
@@ -140,43 +160,54 @@ Apify.main(async () => {
 
     await crawler.run();
 
-    if (!data.size || !lastUpdatedAtSource) {
+    if (!hasNewData) {
+        log.info('No new data', { lastUpdatedAtSource, lastUpdate });
+
+        // no new data, don't fail, just update the timestamp
+        if (currentData) {
+            currentData = {
+                ...currentData,
+                lastUpdatedAtApify: new Date().toISOString(),
+            };
+
+            await Apify.pushData(currentData);
+            await kv.setValue('LATEST', currentData);
+        }
+
+        return;
+    }
+
+    if (!data || !lastUpdatedAtSource) {
         throw new Error('Missing data');
     }
 
-    const order = [...data.keys()].sort((a, b) => {
-        const dateA = new Date(a).getTime();
-        const dateB = new Date(b).getTime();
+    const checkRegions = item => !Number.isInteger(item.count) || !item.state || item.state.length !== 2;
 
-        return dateA - dateB;
-    });
+    // sanity check before updating, the data is seldomly unreliable
+    if (!Number.isInteger(data.deceased)
+        || !Number.isInteger(data.infected)
+        || !data.infected
+        || !data.deceased
+        || !data.deceasedByRegion
+        || !data.infectedByRegion
+        || data.deceasedByRegion.length !== 27
+        || data.infectedByRegion.length !== 27
+        || data.deceasedByRegion.some(checkRegions)
+        || data.infectedByRegion.some(checkRegions)
+    ) {
+        await Apify.setValue('data', data);
 
-    const transformedData = order.map((key) => {
-        const set = data.get(key);
+        throw new Error('Data check failed');
+    }
 
-        return {
-            version,
-            infected: countTotals(set, 'infected'),
-            deceased: countTotals(set, 'deceased'),
-            infectedByRegion: mapRegions(set, 'infected'),
-            deceasedByRegion: mapRegions(set, 'deceased'),
-            sourceUrl,
-            lastUpdatedAtSource: key,
-            lastUpdatedAtApify: new Date().toISOString(),
-            readMe: 'https://apify.com/pocesar/covid-brazil',
-        };
-    });
-
-    await kv.setValue('LATEST', transformedData[transformedData.length - 1]);
-
-    lastUpdatedAtSource = order.pop();
+    await kv.setValue('LATEST', data);
 
     if (lastUpdate.toISOString() !== lastUpdatedAtSource) {
-        await history.pushData(transformedData);
+        await history.pushData(data);
     }
 
     // always push data to default dataset
-    await Apify.pushData(transformedData);
+    await Apify.pushData(data);
 
     log.info('Done');
 });
